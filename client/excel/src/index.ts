@@ -25,22 +25,6 @@ interface ExcelData {
     sheets: ExcelSheet[];
 }
 
-interface ToolParameter {
-    type: string;
-    properties: Record<string, any>;
-    required?: string[];
-}
-
-interface Tool {
-    name: string;
-    description?: string;
-    inputSchema?: {
-        type: string;
-        properties: Record<string, unknown>;
-        required?: string[];
-    };
-}
-
 interface ToolResult {
     type: string;
     text?: string;
