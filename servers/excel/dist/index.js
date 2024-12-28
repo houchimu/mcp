@@ -102,10 +102,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     };
 });
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    return { resources: [] };
+    return {
+        resources: [
+            {
+                uri: "file:///example.txt",
+                name: "Example Resource",
+            },
+        ],
+    };
 });
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    throw new Error("リソースが見つかりません");
+    if (request.params.uri === "file:///example.txt") {
+        return {
+            contents: [
+                {
+                    uri: "file:///example.txt",
+                    mimeType: "text/plain",
+                    text: "This is the content of the example resource.",
+                },
+            ],
+        };
+    }
+    else {
+        throw new Error("Resource not found");
+    }
 });
 const transport = new StdioServerTransport();
 await server.connect(transport);
