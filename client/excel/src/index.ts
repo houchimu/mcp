@@ -2,8 +2,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ListToolsResultSchema, CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import OpenAI from 'openai';
-import { config } from 'dotenv';
 import { ChatCompletionTool } from 'openai/resources/chat/completions';
+import { config } from 'dotenv';
 import readline from 'readline';
 
 // Load environment variables
@@ -34,7 +34,8 @@ interface ToolParameter {
 interface Tool {
     name: string;
     description?: string;
-    parameters?: {
+    inputSchema?: {
+        type: string;
         properties: Record<string, unknown>;
         required?: string[];
     };
@@ -159,31 +160,18 @@ class MCPClient {
                 ListToolsResultSchema
             );
 
-            const availableTools: ChatCompletionTool[] = response.tools.map(tool => {
-                const parameters = {
-                    type: "object",
-                    properties: {} as Record<string, unknown>,
-                    required: [] as string[]
-                };
-
-                if (tool.parameters && typeof tool.parameters === 'object') {
-                    if ('properties' in tool.parameters && tool.parameters.properties) {
-                        parameters.properties = tool.parameters.properties as Record<string, unknown>;
-                    }
-                    if ('required' in tool.parameters && Array.isArray(tool.parameters.required)) {
-                        parameters.required = tool.parameters.required;
+            const availableTools: ChatCompletionTool[] = response.tools.map(tool => ({
+                type: "function",
+                function: {
+                    name: tool.name,
+                    description: tool.description || undefined,
+                    parameters: {
+                        type: "object",
+                        properties: tool.inputSchema?.properties || {},
+                        required: tool.inputSchema?.required || []
                     }
                 }
-
-                return {
-                    type: "function" as const,
-                    function: {
-                        name: tool.name,
-                        description: tool.description || undefined,
-                        parameters: parameters
-                    }
-                };
-            });
+            }));
 
             console.log("Available tools:", JSON.stringify(availableTools, null, 2));
 
@@ -282,7 +270,6 @@ class MCPClient {
     async cleanup(): Promise<void> {
         if (this.client) {
             try {
-                // MCPクライアントの接続を切断
                 await this.client.close();
             } catch (error) {
                 console.error("Cleanup error:", error);
@@ -292,21 +279,15 @@ class MCPClient {
 }
 
 async function main(): Promise<void> {
-    if (process.argv.length < 3) {
-        console.log("Usage: ts-node index.ts <path_to_server_script>");
-        process.exit(1);
-    }
-
     const client = new MCPClient();
     try {
-        await client.connect(process.argv[2]);
+        await client.connect("C:\\workspace\\mcp\\servers\\excel\\dist\\index.js");
         await client.chatLoop();
     } finally {
         await client.cleanup();
     }
 }
 
-// ES Modulesでのメインスクリプト実行チェック
 if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch(console.error);
 }

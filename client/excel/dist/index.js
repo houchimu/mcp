@@ -86,29 +86,18 @@ class MCPClient {
         try {
             // Get available tools
             const response = await this.client.request({ method: "tools/list" }, ListToolsResultSchema);
-            const availableTools = response.tools.map(tool => {
-                const parameters = {
-                    type: "object",
-                    properties: {},
-                    required: []
-                };
-                if (tool.parameters && typeof tool.parameters === 'object') {
-                    if ('properties' in tool.parameters && tool.parameters.properties) {
-                        parameters.properties = tool.parameters.properties;
-                    }
-                    if ('required' in tool.parameters && Array.isArray(tool.parameters.required)) {
-                        parameters.required = tool.parameters.required;
+            const availableTools = response.tools.map(tool => ({
+                type: "function",
+                function: {
+                    name: tool.name,
+                    description: tool.description || undefined,
+                    parameters: {
+                        type: "object",
+                        properties: tool.inputSchema?.properties || {},
+                        required: tool.inputSchema?.required || []
                     }
                 }
-                return {
-                    type: "function",
-                    function: {
-                        name: tool.name,
-                        description: tool.description || undefined,
-                        parameters: parameters
-                    }
-                };
-            });
+            }));
             console.log("Available tools:", JSON.stringify(availableTools, null, 2));
             // First GPT call to decide tool usage
             const initialResponse = await this.openai.chat.completions.create({
@@ -187,7 +176,6 @@ class MCPClient {
     async cleanup() {
         if (this.client) {
             try {
-                // MCPクライアントの接続を切断
                 await this.client.close();
             }
             catch (error) {
@@ -197,20 +185,15 @@ class MCPClient {
     }
 }
 async function main() {
-    if (process.argv.length < 3) {
-        console.log("Usage: ts-node index.ts <path_to_server_script>");
-        process.exit(1);
-    }
     const client = new MCPClient();
     try {
-        await client.connect(process.argv[2]);
+        await client.connect("C:\\workspace\\mcp\\servers\\excel\\dist\\index.js");
         await client.chatLoop();
     }
     finally {
         await client.cleanup();
     }
 }
-// ES Modulesでのメインスクリプト実行チェック
 if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch(console.error);
 }
