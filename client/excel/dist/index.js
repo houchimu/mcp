@@ -185,6 +185,7 @@ class MCPClient {
     }
 }
 async function main() {
+    await multiServerConnectionTest();
     const client = new MCPClient();
     try {
         await client.connect("C:\\workspace\\mcp\\servers\\excel\\dist\\index.js");
@@ -198,4 +199,39 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     main().catch(console.error);
 }
 await main();
+async function multiServerConnectionTest() {
+    // Initialize transport
+    const transport1 = new StdioClientTransport({
+        command: "node",
+        args: ["C:\\workspace\\mcp\\servers\\excel\\dist\\index.js"]
+    });
+    // Initialize client
+    const client1 = new Client({
+        name: "excel-client",
+        version: "1.0.0",
+    }, {
+        capabilities: {}
+    });
+    // Connect to server
+    await client1.connect(transport1);
+    const response1 = await client1.request({ method: "tools/list" }, ListToolsResultSchema);
+    client1.close();
+    // Initialize transport
+    const transport2 = new StdioClientTransport({
+        command: "node",
+        args: ["C:\\workspace\\mcp\\servers\\api\\dist\\index.js"]
+    });
+    // Initialize client
+    const client2 = new Client({
+        name: "api-client",
+        version: "1.0.0",
+    }, {
+        capabilities: {}
+    });
+    // Connect to server
+    await client2.connect(transport2);
+    const response2 = await client2.request({ method: "tools/list" }, ListToolsResultSchema);
+    console.log("\nConnected to multi server with tools:", response1.tools.map(tool => tool.name).concat(response2.tools.map(tool => tool.name)));
+    client2.close();
+}
 export default MCPClient;

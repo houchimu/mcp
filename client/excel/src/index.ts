@@ -74,7 +74,7 @@ class MCPClient {
             ListToolsResultSchema
         );
 
-        console.log("\nConnected to server with tools:", 
+        console.log("\nConnected to server with tools:",
             response.tools.map(tool => tool.name));
     }
 
@@ -84,12 +84,12 @@ class MCPClient {
             if (textResult && textResult.text) {
                 return textResult.text;
             }
-            
+
             const binaryResult = data.find(item => item.type === 'binary');
             if (binaryResult && binaryResult.data) {
                 return binaryResult.data;
             }
-            
+
             return "データが見つかりませんでした";
         }
         return data;
@@ -99,13 +99,13 @@ class MCPClient {
         try {
             const data = this.processToolResult(rawData);
             const excelData: ExcelData = typeof data === 'string' ? JSON.parse(data) : data;
-            
+
             const summaryParts: string[] = [];
-            
+
             for (const sheet of excelData.sheets) {
                 const sheetName = sheet.name || 'Unknown';
                 const sheetData = sheet.data;
-                
+
                 if (!sheetData || sheetData.length === 0) {
                     summaryParts.push(
                         `\n=== シート: ${sheetName} ===`,
@@ -113,11 +113,11 @@ class MCPClient {
                     );
                     continue;
                 }
-                
+
                 const headers = Object.keys(sheetData[0]);
                 const previewCount = 5;
                 const previewData = sheetData.slice(0, previewCount);
-                
+
                 summaryParts.push(
                     `\n=== シート: ${sheetName} ===`,
                     `総行数: ${sheetData.length}行`,
@@ -126,7 +126,7 @@ class MCPClient {
                     ...previewData.map(row => JSON.stringify(row))
                 );
             }
-            
+
             return summaryParts.join('\n');
         } catch (error) {
             if (error instanceof SyntaxError) {
@@ -263,6 +263,9 @@ class MCPClient {
 }
 
 async function main(): Promise<void> {
+    await multiServerConnectionTest();
+
+
     const client = new MCPClient();
     try {
         await client.connect("C:\\workspace\\mcp\\servers\\excel\\dist\\index.js");
@@ -277,5 +280,65 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 }
 
 await main();
+
+
+
+
+
+async function multiServerConnectionTest(){
+
+    // Initialize transport
+    const transport1 = new StdioClientTransport({
+        command: "node",
+        args: ["C:\\workspace\\mcp\\servers\\excel\\dist\\index.js"]
+    });
+
+    // Initialize client
+    const client1 = new Client({
+        name: "excel-client",
+        version: "1.0.0",
+    }, {
+        capabilities: {}
+    });
+
+    // Connect to server
+    await client1.connect(transport1);
+
+    const response1 = await client1.request(
+        { method: "tools/list" },
+        ListToolsResultSchema
+    );
+
+    client1.close();
+
+    // Initialize transport
+    const transport2 = new StdioClientTransport({
+        command: "node",
+        args: ["C:\\workspace\\mcp\\servers\\api\\dist\\index.js"]
+    });
+
+    // Initialize client
+    const client2 = new Client({
+        name: "api-client",
+        version: "1.0.0",
+    }, {
+        capabilities: {}
+    });
+
+    // Connect to server
+    await client2.connect(transport2);
+
+    const response2 =  await client2.request(
+        { method: "tools/list" },
+        ListToolsResultSchema
+    );
+
+
+    console.log("\nConnected to multi server with tools:",
+        response1.tools.map(tool => tool.name).concat(response2.tools.map(tool => tool.name)));
+ 
+        client2.close()
+
+}
 
 export default MCPClient;
