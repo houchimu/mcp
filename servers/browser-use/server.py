@@ -4,13 +4,28 @@ import asyncio
 import sys
 import logging
 import io
+import builtins
+import uvicorn
+from contextlib import nullcontext, redirect_stdout, redirect_stderr
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, BrowserConfig
 from langchain_openai import ChatOpenAI
 
-# ------ ロギング関連の設定 -------
-# すべてのロガーを無効化
+# サーバー起動前の準備
+# -------------------------------
+
+# 元のprint関数を保存
+original_print = builtins.print
+
+# 無効なprint関数
+def noop_print(*args, **kwargs):
+    pass
+
+# printを無効化
+builtins.print = noop_print
+
+# すべてのloggerを無効化
 logging.basicConfig(level=logging.CRITICAL)
 
 # すべての既存ロガーを無効化
@@ -18,12 +33,13 @@ for name in logging.root.manager.loggerDict:
     logger = logging.getLogger(name)
     logger.handlers = []
     logger.propagate = False
+    logger.disabled = True
     logger.setLevel(logging.CRITICAL)
 
 # ルートロガーからすべてのハンドラを削除
 logging.root.handlers = []
 
-# FastMCPに関連するモジュールのロガーを明示的に無効化
+# 特に重要なロガーを明示的に無効化
 critical_loggers = [
     "uvicorn", 
     "uvicorn.error", 
@@ -35,7 +51,9 @@ critical_loggers = [
     "mcp.server",
     "browser_use",
     "playwright",
-    "fastapi"
+    "fastapi",
+    "asyncio",
+    "multiprocessing"
 ]
 
 for logger_name in critical_loggers:
@@ -60,16 +78,23 @@ class NullIO(io.IOBase):
 sys.stdout = NullIO()
 sys.stderr = NullIO()
 
+# asyncioのデバッグを無効化
+asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
 # 環境変数をロード
 load_dotenv()
 
-# FastMCP サーバーの作成 - デバッグモードを無効にし、ログレベルを CRITICAL に設定
-# CRITICAL は最も高いロギングレベルで、ほとんどのメッセージを抑制します
+# サーバー設定
+# -------------------------------
+
+# FastMCP サーバーの作成 - 最小限の設定
 mcp = FastMCP(
     "Browser Use Server",
     settings={
         "debug": False,
-        "log_level": "critical"  # UvicornとStarletteのログレベルを最も制限
+        "log_level": "critical"
     }
 )
 
@@ -95,6 +120,9 @@ def get_or_create_agent(task: str):
         )
     
     return browser_agent
+
+# サーバーツール定義 
+# -------------------------------
 
 @mcp.tool()
 async def initialize_browser() -> str:
@@ -321,13 +349,21 @@ async def submit_form(form_description: str) -> str:
     except Exception as e:
         return f"フォーム送信に失敗しました: {str(e)}"
 
-# メイン関数
-if __name__ == "__main__":
+# カスタムサーバー起動関数
+# -------------------------------
+def run_mcp_server():
     try:
-        # シンプルな実行
-        mcp.run()
+        # 全ての出力をNullIOに向ける
+        with redirect_stdout(NullIO()), redirect_stderr(NullIO()):
+            # サーバー実行
+            mcp.run()
     except Exception as e:
-        # 例外情報をファイルに記録（デバッグ用）
+        # エラーログをファイルに書き込み
         with open("browser_use_error.log", "a") as f:
             f.write(f"{str(e)}\n")
-        sys.exit(1) 
+        sys.exit(1)
+
+# メイン関数
+if __name__ == "__main__":
+    # サーバー起動
+    run_mcp_server() 
