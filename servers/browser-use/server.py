@@ -5,17 +5,19 @@ from contextlib import redirect_stdout, redirect_stderr
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
-from playwright.sync_api import sync_playwright
+
+# Sync APIのインポートを削除
+# from playwright.sync_api import sync_playwright
 
 
-def perform_console_error_check(url):
-    with sync_playwright() as p:
+async def perform_console_error_check(url):
+    async with async_playwright() as p:
         # ブラウザを起動
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
 
         # コンソールメッセージをキャプチャするためのリスナーを設定
-        page = context.new_page()
+        page = await context.new_page()
         console_errors = []
 
         # コンソールメッセージのハンドラー
@@ -28,15 +30,15 @@ def perform_console_error_check(url):
 
         try:
             # ページにアクセス
-            page.goto(url)
+            await page.goto(url)
 
             # より完全なページ読み込みを待機
-            page.wait_for_load_state("load")  # DOMContentLoadedイベントを待機
-            page.wait_for_load_state("domcontentloaded")  # DOM構造の読み込み完了を待機
-            page.wait_for_load_state("networkidle")  # ネットワークリクエストの完了を待機
+            await page.wait_for_load_state("load")  # DOMContentLoadedイベントを待機
+            await page.wait_for_load_state("domcontentloaded")  # DOM構造の読み込み完了を待機
+            await page.wait_for_load_state("networkidle")  # ネットワークリクエストの完了を待機
 
             # さらに追加の待機時間を設定（必要に応じて調整可能）
-            page.wait_for_timeout(3000)  # 3秒待機
+            await page.wait_for_timeout(3000)  # 3秒待機
 
             # エラーの確認と結果を返す
             if console_errors:
@@ -48,14 +50,14 @@ def perform_console_error_check(url):
             return f"エラーが発生しました: {str(e)}"
         finally:
             # ブラウザを閉じる
-            browser.close()
+            await browser.close()
 
 # シンプルなFastMCPインスタンス作成
 mcp = FastMCP("Browser Use Server")
 
 
 @mcp.tool()
-def check_console_errors(url: str) -> str:
+async def check_console_errors(url: str) -> str:
     """
     指定されたURLにアクセスして、コンソールエラーをチェックします。
 
@@ -65,7 +67,7 @@ def check_console_errors(url: str) -> str:
     Returns:
         コンソールエラーの情報または正常終了メッセージ
     """
-    return perform_console_error_check(url)
+    return await perform_console_error_check(url)
 
 
 # メイン関数
