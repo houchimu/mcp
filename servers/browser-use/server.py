@@ -4,28 +4,123 @@ import os
 import json
 import logging
 import sys
+import io
+import builtins
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, BrowserConfig
 from langchain_openai import ChatOpenAI
 
-# ロギング設定の修正
-# 標準出力へのログ出力を無効化し、ファイルへ出力するように設定
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    filename='browser_use_server.log',  # ログをファイルに出力
-    filemode='a'
-)
+# カスタムNullIOクラスを作成
+class NullIO(io.IOBase):
+    def write(self, *args, **kwargs):
+        return 0
+    
+    def read(self, *args, **kwargs):
+        return ''
+    
+    def flush(self, *args, **kwargs):
+        pass
 
-# ロガーの取得
-logger = logging.getLogger("browser-use-server")
+# 元のprint関数を保存
+original_print = builtins.print
 
-# 環境変数のロード
-load_dotenv()
+# グローバルな設定ファイル
+LOG_FILE = 'browser_use_server.log'
 
-# FastMCPを使用してサーバーを作成
-mcp = FastMCP("Browser Use Server")
+# print関数をオーバーライドする関数
+def disable_print():
+    def silent_print(*args, **kwargs):
+        # ログファイルに書き込む
+        with open(LOG_FILE, 'a') as f:
+            kwargs['file'] = f
+            original_print(*args, **kwargs)
+    
+    builtins.print = silent_print
+
+# print関数を元に戻す関数
+def enable_print():
+    builtins.print = original_print
+
+# ログ設定
+def setup_logging():
+    # すべてのロガーから既存のハンドラを削除
+    for name in logging.root.manager.loggerDict:
+        logger = logging.getLogger(name)
+        logger.handlers = []
+        logger.propagate = False
+        logger.setLevel(logging.CRITICAL)  # すべてのロガーの出力レベルを制限
+    
+    # ルートロガーから既存のハンドラを削除
+    logging.root.handlers = []
+    
+    # ファイルハンドラを作成
+    file_handler = logging.FileHandler(LOG_FILE, mode='a')
+    file_handler.setLevel(logging.INFO)
+    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(file_formatter)
+    
+    # サーバーのロガーだけ設定
+    server_logger = logging.getLogger("browser-use-server")
+    server_logger.setLevel(logging.INFO)
+    server_logger.propagate = False
+    server_logger.handlers = [file_handler]
+    
+    return server_logger
+
+# 標準出力を置き換えるクラス
+class OutputRedirector:
+    def __init__(self):
+        self.null_io = NullIO()
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+    
+    def __enter__(self):
+        sys.stdout = self.null_io
+        sys.stderr = self.null_io
+        disable_print()  # print関数をオーバーライド
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout = self.original_stdout
+        sys.stderr = self.original_stderr
+        enable_print()  # print関数を元に戻す
+
+# もっとも厳格な標準出力リダイレクト
+def initialize_server():
+    # まずprint関数をオーバーライド
+    disable_print()
+    
+    # ログ設定
+    logger = setup_logging()
+    
+    try:
+        with OutputRedirector():
+            # 環境変数のロード
+            load_dotenv()
+            
+            # FastMCPを使用してサーバーを作成
+            mcp = FastMCP("Browser Use Server")
+            
+            # オリジナルのrunメソッドを保存
+            original_run = mcp.run
+            
+            # runメソッドをサイレントバージョンにオーバーライド
+            def silent_run():
+                with OutputRedirector():
+                    return original_run()
+            
+            # runメソッドを置き換え
+            mcp.run = silent_run
+        
+        logger.info("サーバーが正常に初期化されました")
+        return mcp, logger
+    except Exception as e:
+        logger.error(f"サーバーの初期化に失敗しました: {str(e)}")
+        sys.exit(1)
+
+# サーバーの初期化
+mcp, logger = initialize_server()
 
 # ブラウザエージェント管理
 browser_agent = None
@@ -44,12 +139,14 @@ async def initialize_browser() -> str:
     global browser_instance
     
     try:
-        # ブラウザインスタンスを作成
-        browser_instance = Browser(
-            config=BrowserConfig(
-                headless=True
+        # 標準出力をリダイレクトして初期化
+        with OutputRedirector():
+            # ブラウザインスタンスを作成
+            browser_instance = Browser(
+                config=BrowserConfig(
+                    headless=True
+                )
             )
-        )
         
         logger.info("ブラウザが正常に初期化されました")
         return "ブラウザが正常に初期化されました"
@@ -72,7 +169,8 @@ async def close_browser() -> str:
         return "ブラウザはまだ初期化されていません。"
     
     try:
-        await browser_instance.close()
+        with OutputRedirector():
+            await browser_instance.close()
         browser_instance = None
         logger.info("ブラウザが正常に終了しました")
         return "ブラウザが正常に終了しました"
@@ -86,15 +184,16 @@ def get_or_create_agent(task: str):
     global browser_agent, browser_instance
     
     if not browser_agent and browser_instance:
-        # OpenAI APIキーが設定されていない場合、ダミーのLLMを作成
-        # 実際の利用時には適切なAPIキーを設定してください
-        llm = ChatOpenAI(model="gpt-4o")
-        
-        browser_agent = Agent(
-            task=task,
-            llm=llm,
-            browser=browser_instance
-        )
+        with OutputRedirector():
+            # OpenAI APIキーが設定されていない場合、ダミーのLLMを作成
+            # 実際の利用時には適切なAPIキーを設定してください
+            llm = ChatOpenAI(model="gpt-4o")
+            
+            browser_agent = Agent(
+                task=task,
+                llm=llm,
+                browser=browser_instance
+            )
     
     return browser_agent
 
@@ -117,7 +216,11 @@ async def browse(url: str) -> str:
     try:
         logger.info(f"URL {url} にアクセスします")
         agent = get_or_create_agent(f"Webページ「{url}」にアクセスする")
-        response = await agent.run()
+        
+        # 標準出力をリダイレクトして実行
+        with OutputRedirector():
+            response = await agent.run()
+        
         current_url = url
         logger.info(f"URL {url} にアクセスしました")
         return f"URLにアクセスしました: {url}\n\n応答: {response[:500]}..." if len(response) > 500 else response
@@ -144,7 +247,11 @@ async def execute_task(task: str) -> str:
     try:
         logger.info(f"タスク実行: {task}")
         agent = get_or_create_agent(task)
-        response = await agent.run()
+        
+        # 標準出力をリダイレクトして実行
+        with OutputRedirector():
+            response = await agent.run()
+            
         last_response = response
         
         # 長い応答は切り詰める
@@ -177,7 +284,9 @@ async def get_page_info() -> str:
     try:
         logger.info("ページ情報を取得します")
         agent = get_or_create_agent(f"現在開いているページ「{current_url}」のタイトル、URL、主要なコンテンツを取得する")
-        response = await agent.run()
+        
+        with OutputRedirector():
+            response = await agent.run()
         
         # 長い応答は切り詰める
         if len(response) > 1500:
@@ -208,7 +317,9 @@ async def find_elements(description: str) -> str:
     try:
         logger.info(f"要素を検索します: {description}")
         agent = get_or_create_agent(f"現在のページで「{description}」に一致する要素を見つけて内容を報告する")
-        response = await agent.run()
+        
+        with OutputRedirector():
+            response = await agent.run()
         
         # 長い応答は切り詰める
         if len(response) > 1500:
@@ -239,7 +350,9 @@ async def click_element(description: str) -> str:
     try:
         logger.info(f"要素をクリックします: {description}")
         agent = get_or_create_agent(f"現在のページで「{description}」に一致する要素を見つけてクリックする")
-        response = await agent.run()
+        
+        with OutputRedirector():
+            response = await agent.run()
         
         logger.info("クリック操作が完了しました")
         return f"クリック結果:\n{response}"
@@ -267,7 +380,9 @@ async def fill_form(form_description: str, data: str) -> str:
     try:
         logger.info(f"フォームにデータを入力します: {form_description}, データ: {data}")
         agent = get_or_create_agent(f"現在のページで「{form_description}」に一致するフォームを見つけて、以下のデータを入力する: {data}")
-        response = await agent.run()
+        
+        with OutputRedirector():
+            response = await agent.run()
         
         logger.info("フォーム入力が完了しました")
         return f"フォーム入力結果:\n{response}"
@@ -291,7 +406,9 @@ async def take_screenshot() -> str:
     try:
         logger.info("スクリーンショットを撮影します")
         agent = get_or_create_agent("現在のページのスクリーンショットを撮影する")
-        response = await agent.run()
+        
+        with OutputRedirector():
+            response = await agent.run()
         
         # スクリーンショットのパスを設定
         screenshot_dir = "screenshots"
@@ -330,7 +447,9 @@ async def submit_form(form_description: str) -> str:
     try:
         logger.info(f"フォームを送信します: {form_description}")
         agent = get_or_create_agent(f"現在のページで「{form_description}」に一致するフォームを見つけて送信する")
-        response = await agent.run()
+        
+        with OutputRedirector():
+            response = await agent.run()
         
         logger.info("フォーム送信が完了しました")
         return f"フォーム送信結果:\n{response}"
@@ -343,8 +462,8 @@ if __name__ == "__main__":
     # サーバー起動メッセージをログに記録
     logger.info("Browser Use MCPサーバーを起動します...")
     
-    # サーバーを実行
     try:
+        # オーバーライドしたサイレントバージョンのrunメソッドを使用
         mcp.run()
     except Exception as e:
         logger.error(f"サーバー実行中にエラーが発生しました: {str(e)}")
