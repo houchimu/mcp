@@ -2,10 +2,24 @@ from mcp.server.fastmcp import FastMCP
 import asyncio
 import os
 import json
+import logging
+import sys
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, BrowserConfig
 from langchain_openai import ChatOpenAI
+
+# ロギング設定の修正
+# 標準出力へのログ出力を無効化し、ファイルへ出力するように設定
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='browser_use_server.log',  # ログをファイルに出力
+    filemode='a'
+)
+
+# ロガーの取得
+logger = logging.getLogger("browser-use-server")
 
 # 環境変数のロード
 load_dotenv()
@@ -37,8 +51,10 @@ async def initialize_browser() -> str:
             )
         )
         
+        logger.info("ブラウザが正常に初期化されました")
         return "ブラウザが正常に初期化されました"
     except Exception as e:
+        logger.error(f"ブラウザの初期化に失敗しました: {str(e)}")
         return f"ブラウザの初期化に失敗しました: {str(e)}"
 
 # ブラウザを終了するツール
@@ -52,13 +68,16 @@ async def close_browser() -> str:
     global browser_instance
     
     if not browser_instance:
+        logger.warning("ブラウザはまだ初期化されていません")
         return "ブラウザはまだ初期化されていません。"
     
     try:
         await browser_instance.close()
         browser_instance = None
+        logger.info("ブラウザが正常に終了しました")
         return "ブラウザが正常に終了しました"
     except Exception as e:
+        logger.error(f"ブラウザの終了に失敗しました: {str(e)}")
         return f"ブラウザの終了に失敗しました: {str(e)}"
 
 # エージェントの作成または取得
@@ -92,14 +111,18 @@ async def browse(url: str) -> str:
     global browser_instance, current_url
     
     if not browser_instance:
+        logger.warning("ブラウザが初期化されていません")
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
+        logger.info(f"URL {url} にアクセスします")
         agent = get_or_create_agent(f"Webページ「{url}」にアクセスする")
         response = await agent.run()
         current_url = url
+        logger.info(f"URL {url} にアクセスしました")
         return f"URLにアクセスしました: {url}\n\n応答: {response[:500]}..." if len(response) > 500 else response
     except Exception as e:
+        logger.error(f"URLアクセス中にエラーが発生しました: {str(e)}")
         return f"エラーが発生しました: {str(e)}"
 
 @mcp.tool()
@@ -115,9 +138,11 @@ async def execute_task(task: str) -> str:
     global browser_instance, last_response
     
     if not browser_instance:
+        logger.warning("ブラウザが初期化されていません")
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
+        logger.info(f"タスク実行: {task}")
         agent = get_or_create_agent(task)
         response = await agent.run()
         last_response = response
@@ -126,8 +151,10 @@ async def execute_task(task: str) -> str:
         if len(response) > 1500:
             response = response[:1497] + "..."
         
+        logger.info("タスクが完了しました")
         return f"タスク実行結果:\n{response}"
     except Exception as e:
+        logger.error(f"タスク実行中にエラーが発生しました: {str(e)}")
         return f"タスク実行に失敗しました: {str(e)}"
 
 @mcp.tool()
@@ -140,12 +167,15 @@ async def get_page_info() -> str:
     global browser_instance, current_url
     
     if not browser_instance:
+        logger.warning("ブラウザが初期化されていません")
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     if not current_url:
+        logger.warning("まだページが開かれていません")
         return "まだページが開かれていません。browse()を使用してURLにアクセスしてください。"
     
     try:
+        logger.info("ページ情報を取得します")
         agent = get_or_create_agent(f"現在開いているページ「{current_url}」のタイトル、URL、主要なコンテンツを取得する")
         response = await agent.run()
         
@@ -153,8 +183,10 @@ async def get_page_info() -> str:
         if len(response) > 1500:
             response = response[:1497] + "..."
         
+        logger.info("ページ情報を取得しました")
         return f"ページ情報:\n{response}"
     except Exception as e:
+        logger.error(f"ページ情報取得中にエラーが発生しました: {str(e)}")
         return f"ページ情報の取得に失敗しました: {str(e)}"
 
 @mcp.tool()
@@ -170,9 +202,11 @@ async def find_elements(description: str) -> str:
     global browser_instance
     
     if not browser_instance:
+        logger.warning("ブラウザが初期化されていません")
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
+        logger.info(f"要素を検索します: {description}")
         agent = get_or_create_agent(f"現在のページで「{description}」に一致する要素を見つけて内容を報告する")
         response = await agent.run()
         
@@ -180,8 +214,10 @@ async def find_elements(description: str) -> str:
         if len(response) > 1500:
             response = response[:1497] + "..."
         
+        logger.info("要素の検索が完了しました")
         return f"検索結果:\n{response}"
     except Exception as e:
+        logger.error(f"要素検索中にエラーが発生しました: {str(e)}")
         return f"要素の検索に失敗しました: {str(e)}"
 
 @mcp.tool()
@@ -197,14 +233,18 @@ async def click_element(description: str) -> str:
     global browser_instance
     
     if not browser_instance:
+        logger.warning("ブラウザが初期化されていません")
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
+        logger.info(f"要素をクリックします: {description}")
         agent = get_or_create_agent(f"現在のページで「{description}」に一致する要素を見つけてクリックする")
         response = await agent.run()
         
+        logger.info("クリック操作が完了しました")
         return f"クリック結果:\n{response}"
     except Exception as e:
+        logger.error(f"クリック操作中にエラーが発生しました: {str(e)}")
         return f"クリックに失敗しました: {str(e)}"
 
 @mcp.tool()
@@ -221,14 +261,18 @@ async def fill_form(form_description: str, data: str) -> str:
     global browser_instance
     
     if not browser_instance:
+        logger.warning("ブラウザが初期化されていません")
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
+        logger.info(f"フォームにデータを入力します: {form_description}, データ: {data}")
         agent = get_or_create_agent(f"現在のページで「{form_description}」に一致するフォームを見つけて、以下のデータを入力する: {data}")
         response = await agent.run()
         
+        logger.info("フォーム入力が完了しました")
         return f"フォーム入力結果:\n{response}"
     except Exception as e:
+        logger.error(f"フォーム入力中にエラーが発生しました: {str(e)}")
         return f"フォーム入力に失敗しました: {str(e)}"
 
 @mcp.tool()
@@ -241,9 +285,11 @@ async def take_screenshot() -> str:
     global browser_instance
     
     if not browser_instance:
+        logger.warning("ブラウザが初期化されていません")
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
+        logger.info("スクリーンショットを撮影します")
         agent = get_or_create_agent("現在のページのスクリーンショットを撮影する")
         response = await agent.run()
         
@@ -259,8 +305,10 @@ async def take_screenshot() -> str:
         # スクリーンショットを保存
         # 注: browser-useライブラリによるスクリーンショットの保存方法は実際の実装に合わせて調整してください
         
+        logger.info(f"スクリーンショットを保存しました: {filename}")
         return f"スクリーンショット処理結果:\n{response}"
     except Exception as e:
+        logger.error(f"スクリーンショット撮影中にエラーが発生しました: {str(e)}")
         return f"スクリーンショット撮影に失敗しました: {str(e)}"
 
 @mcp.tool()
@@ -276,17 +324,28 @@ async def submit_form(form_description: str) -> str:
     global browser_instance
     
     if not browser_instance:
+        logger.warning("ブラウザが初期化されていません")
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
+        logger.info(f"フォームを送信します: {form_description}")
         agent = get_or_create_agent(f"現在のページで「{form_description}」に一致するフォームを見つけて送信する")
         response = await agent.run()
         
+        logger.info("フォーム送信が完了しました")
         return f"フォーム送信結果:\n{response}"
     except Exception as e:
+        logger.error(f"フォーム送信中にエラーが発生しました: {str(e)}")
         return f"フォーム送信に失敗しました: {str(e)}"
 
 # メイン関数
 if __name__ == "__main__":
+    # サーバー起動メッセージをログに記録
+    logger.info("Browser Use MCPサーバーを起動します...")
+    
     # サーバーを実行
-    mcp.run() 
+    try:
+        mcp.run()
+    except Exception as e:
+        logger.error(f"サーバー実行中にエラーが発生しました: {str(e)}")
+        sys.exit(1) 
