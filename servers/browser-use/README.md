@@ -1,35 +1,37 @@
 # Browser-Use MCP サーバー
 
-このサーバーはブラウザの操作と情報取得のための機能を提供するMCPサーバーです。Playwrightを使用して実際のブラウザを制御します。
+このサーバーはブラウザの操作と情報取得のための機能を提供するMCPサーバーです。browser-useライブラリを使用してAIによるブラウザ自動化を実現します。
 
 ## 機能
 
 このサーバーは以下の機能を提供します：
 
 1. **browse(url)**: 指定されたURLにアクセスします
-2. **get_page_title()**: 現在開いているページのタイトルを取得します
-3. **get_page_content()**: 現在開いているページのテキスト内容を取得します
-4. **find_elements(selector)**: 指定されたCSSセレクタに一致する要素を検索します
-5. **get_current_url()**: 現在開いているページのURLを取得します
-6. **click(selector)**: 指定されたセレクタの要素をクリックします
-7. **type_text(selector, text)**: 指定されたセレクタの要素にテキストを入力します
-8. **take_screenshot()**: 現在のページのスクリーンショットを撮影します
-9. **execute_javascript(script)**: ページ上でJavaScriptを実行します
-10. **submit_form(selector)**: 指定されたフォームを送信します
+2. **execute_task(task)**: 指定されたタスクをブラウザで自然言語指示に基づいて実行します
+3. **get_page_info()**: 現在開いているページの情報を取得します
+4. **find_elements(description)**: 指定された説明に一致する要素を自然言語で検索します
+5. **click_element(description)**: 指定された説明に一致する要素を自然言語でクリックします
+6. **fill_form(form_description, data)**: 指定されたフォームにデータを自然言語で入力します
+7. **take_screenshot()**: 現在のページのスクリーンショットを撮影します
+8. **submit_form(form_description)**: 指定されたフォームを自然言語で送信します
 
 ## 依存関係
 
 このサーバーを実行するには以下の依存パッケージが必要です：
 
 ```
-playwright>=1.38.0
+browser-use>=0.2.0
 python-dotenv>=1.0.0
+langchain-openai>=0.1.0
 ```
 
-初回実行時には、以下のコマンドでPlaywrightのブラウザをインストールする必要があります：
+## 設定
+
+このサーバーを使用するには、`.env`ファイルに適切なAPI設定を行う必要があります：
 
 ```bash
-playwright install
+# .env ファイル例
+OPENAI_API_KEY=your_openai_key_here
 ```
 
 ## 実行方法
@@ -46,43 +48,37 @@ python server.py
 # URLにアクセス
 await browse("https://example.com")
 
-# ページタイトルを取得
-title = await get_page_title()
+# 自然言語でタスクを実行
+await execute_task("ページ内の最初のリンクをクリックして、次のページのタイトルを報告する")
 
-# ページ内容を取得
-content = await get_page_content()
+# ページ情報を取得
+info = await get_page_info()
 
-# 要素を検索
-elements = await find_elements("div.main")
+# 自然言語で要素を検索
+elements = await find_elements("ナビゲーションメニューの項目")
 
-# 要素をクリックする
-await click("button.submit")
+# 自然言語で要素をクリック
+await click_element("ログインボタン")
 
-# フォームに入力する
-await type_text("#search-input", "検索キーワード")
+# 自然言語でフォームに入力
+await fill_form("ログインフォーム", "ユーザー名: test_user、パスワード: test123")
 
-# フォームを送信する
-await submit_form("form#search")
-
-# JavaScriptを実行する
-await execute_javascript("return document.title")
-
-# スクリーンショットを撮影する
+# スクリーンショットを撮影
 await take_screenshot()
 
-# 現在のURLを取得
-current_url = await get_current_url()
+# 自然言語でフォームを送信
+await submit_form("検索フォーム")
 ```
 
 ## 特徴
 
-- **実際のブラウザエンジン**: Chromiumブラウザを使用して、JavaScript対応のWebページも正確に表示・操作できます
-- **シンプルなAPI**: 複雑なブラウザ操作も簡単なAPIで利用可能です
-- **非同期操作**: すべての操作は非同期的に行われ、効率的な実行が可能です
-- **スクリーンショット機能**: 現在の表示状態を画像として保存できます
+- **AIによるブラウザ操作**: LLMによる自然言語理解を利用して、ブラウザを自動操作します
+- **シンプルなインターフェース**: 複雑なCSSセレクタやXPathを覚える必要がなく、自然言語で操作できます
+- **柔軟な対応**: ウェブサイトの変更に強く、要素の見た目や目的から適切な操作を実行します
+- **LangChainとの連携**: LangChainエコシステムと連携し、様々なLLMを利用可能です
 
 ## 注意事項
 
-- このサーバーを実行するには、Playwrightがサポートする環境が必要です
-- 初回実行時にはブラウザのダウンロードが行われるため、インターネット接続が必要です
-- スクリーンショットはサーバーのローカルディスクに保存されます 
+- このサーバーを使用するには、OpenAIなどのLLM APIキーが必要です
+- 処理時間はLLMの応答時間に依存するため、Playwrightなど低レベルのブラウザ自動化ツールよりも遅くなる場合があります
+- LLMの判断に基づくため、完全に決定論的な動作は保証されません 

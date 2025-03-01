@@ -6,72 +6,59 @@ async def test_browser_use():
     
     # ツールのインスタンスを作成
     browse = Tool("browse")
-    get_page_title = Tool("get_page_title")
-    get_page_content = Tool("get_page_content")
+    execute_task = Tool("execute_task")
+    get_page_info = Tool("get_page_info")
     find_elements = Tool("find_elements")
-    get_current_url = Tool("get_current_url")
-    click = Tool("click")
-    type_text = Tool("type_text")
+    click_element = Tool("click_element")
+    fill_form = Tool("fill_form")
     take_screenshot = Tool("take_screenshot")
-    execute_javascript = Tool("execute_javascript")
     submit_form = Tool("submit_form")
     
-    # 1. URLにアクセス
+    # 1. Googleにアクセス
     print("1. Google.comにアクセスします...")
     result = await browse(url="https://www.google.com")
     print(result)
     
-    # 2. ページタイトルを取得
-    print("\n2. ページタイトルを取得します...")
-    title = await get_page_title()
-    print(title)
+    # 2. ページ情報を取得
+    print("\n2. ページ情報を取得します...")
+    info = await get_page_info()
+    print(info)
     
-    # 3. 現在のURLを確認
-    print("\n3. 現在のURLを確認します...")
-    current_url = await get_current_url()
-    print(current_url)
+    # 3. 検索フォームを検索
+    print("\n3. 検索フォームを検索します...")
+    search_elements = await find_elements(description="検索フォーム")
+    print(search_elements)
     
-    # 4. 検索フォームに入力
-    print("\n4. 検索フォームに「Playwright Python」と入力します...")
-    await type_text("input[name='q']", "Playwright Python")
+    # 4. フォームに入力
+    print("\n4. 検索フォームに「browser-use python」と入力します...")
+    await fill_form(form_description="検索フォーム", data="browser-use python")
     
-    # 5. セレクタを使って要素を検索
-    print("\n5. 検索ボタンを検索します...")
-    elements = await find_elements("input[type='submit']")
-    print(elements)
-    
-    # 6. スクリーンショットを撮影
-    print("\n6. 入力前の状態をスクリーンショットで保存します...")
+    # 5. スクリーンショットを撮影
+    print("\n5. 入力後の状態をスクリーンショットで保存します...")
     screenshot = await take_screenshot()
     print(screenshot)
     
-    # 7. JavaScriptを実行してドキュメントタイトルを取得
-    print("\n7. JavaScriptを実行してタイトルを取得します...")
-    js_result = await execute_javascript("return document.title")
-    print(js_result)
+    # 6. フォームを送信
+    print("\n6. 検索フォームを送信します...")
+    submit_result = await submit_form(form_description="検索フォーム")
+    print(submit_result)
     
-    # 8. 検索フォームを送信
-    print("\n8. 検索フォームを送信します...")
-    await submit_form("form")
-    print("フォームを送信しました")
+    # 7. 複合タスクを実行
+    print("\n7. 複合タスクを実行します...")
+    complex_task = await execute_task(
+        task="検索結果から最初の3つのリンクのタイトルを抽出して、それらを箇条書きで返してください"
+    )
+    print(complex_task)
     
-    # 9. 結果ページを表示
-    print("\n9. 検索結果ページが表示されました")
+    # 8. 要素をクリック
+    print("\n8. 最初の検索結果をクリックします...")
+    click_result = await click_element(description="最初の検索結果")
+    print(click_result)
     
-    # 10. 結果ページのタイトルを取得
-    print("\n10. 結果ページのタイトルを取得します...")
-    title = await get_page_title()
-    print(title)
-    
-    # 11. 検索結果の要素を検索
-    print("\n11. 検索結果の要素を検索します...")
-    results = await find_elements("h3")
-    print(results)
-    
-    # 12. ページ内容を取得
-    print("\n12. ページ内容を取得します...")
-    content = await get_page_content()
-    print(content[:200] + "...") # 長いので最初の部分だけ表示
+    # 9. 最終ページの情報を取得
+    print("\n9. 遷移先ページの情報を取得します...")
+    final_info = await get_page_info()
+    print(final_info)
 
 if __name__ == "__main__":
     # 非同期関数を実行
