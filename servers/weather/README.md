@@ -1,6 +1,6 @@
 # Weather MCP Server
 
-これはClaudeから呼び出し可能な、天気情報を提供するMCPサーバーの実装例です。
+これはClaudeから呼び出し可能な、天気情報を提供するMCPサーバーの実装例です。このサーバーは公式のMCP SDKを使用しています。
 
 ## 機能
 
@@ -12,15 +12,36 @@
 ### 1. 必要なライブラリのインストール
 
 ```bash
-# 特別なライブラリは現時点で不要
-# 必要に応じて外部APIを使用する場合はrequestsなどをインストール
-# pip install requests
+# MCPの依存関係をインストール
+uv add mcp[cli] httpx
+
+# または pip を使用する場合
+# pip install mcp[cli] httpx
 ```
 
 ### 2. サーバーの起動方法
 
 ```bash
+# 直接実行
 python server.py
+
+# または MCP CLI を使用（推奨）
+mcp dev server.py
+```
+
+### 3. Claude for Desktopとの連携
+
+Claude for Desktopの設定ファイル（`claude_desktop_config.json`）に以下のように設定を追加します：
+
+```json
+{
+  "weather": {
+    "command": "python",
+    "args": [
+      "C:\\workspace\\mcp\\servers\\weather\\server.py"
+    ]
+  }
+}
 ```
 
 ## 使用方法
@@ -41,12 +62,11 @@ python server.py
 
 ## 開発者向け情報
 
-このサーバーは簡易的なMCP実装を使用しています。実際のプロダクション環境では、以下の拡張が推奨されます:
+このサーバーは公式のMCP SDK (`FastMCP`)を使用しています。さらなる拡張には以下が推奨されます:
 
-1. 本格的なMCP SDK（pythonであれば`modelcontextprotocol-python`など）の使用
-2. 実際の天気API（OpenWeatherMapなど）との連携
-3. エラーハンドリングの強化
-4. ロギング機能の追加
+1. 実際の天気API（OpenWeatherMapなど）との連携
+2. より多くの都市への対応
+3. 天気予報機能の追加
 
 ## ライセンス
 
