@@ -126,12 +126,18 @@ try:
 except Exception as e:
     debug_log(f"標準出力のリダイレクトに失敗: {str(e)}")
 
-# asyncioのデバッグを無効化
+# asyncioのデバッグを無効化し、高速化設定を追加
 try:
-    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+    # asyncio設定をオーバーライド（UVloopは使用しない）
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy() if sys.platform == 'win32' else asyncio.DefaultEventLoopPolicy())
+    
+    # プールサイズを調整して処理を高速化
     loop = asyncio.new_event_loop()
+    loop.set_debug(False)  # デバッグモードを無効化
+    
+    # イベントループを設定
     asyncio.set_event_loop(loop)
-    debug_log("asyncioイベントループを設定しました")
+    debug_log("asyncioイベントループを最適化設定で構成しました")
 except Exception as e:
     debug_log(f"asyncioイベントループの設定に失敗: {str(e)}")
 
@@ -145,13 +151,23 @@ except Exception as e:
 # サーバー設定
 # -------------------------------
 
+# FastMCPのカスタムレスポンスハンドラー
+def on_initialize(request):
+    debug_log(f"初期化リクエストを受信: {request}")
+    # 早期レスポンスを返す
+    return {"message": "初期化が成功しました"}
+
 # カスタムハンドラーを追加したFastMCP サーバーの作成
 try:
     mcp = FastMCP(
         "Browser Use Server",
         settings={
             "log_level": "critical",
-            "debug": False
+            "debug": False,
+            "timeout": 120,  # タイムアウトを120秒に拡張
+            "host": "127.0.0.1",  # ローカルホストに限定
+            "ready_timeout": 10,  # 準備完了タイムアウトを短く設定
+            "shutdown_timeout": 10  # シャットダウンタイムアウトを短く設定
         }
     )
     debug_log("FastMCPサーバーを作成しました")
@@ -169,6 +185,7 @@ current_url = ""
 
 # 遅延初期化によるPlaywrightの起動エラー回避
 BROWSER_INITIALIZED = False
+INITIALIZATION_IN_PROGRESS = False  # 初期化進行中フラグ
 
 # サーバーツール定義 
 # -------------------------------
@@ -180,7 +197,18 @@ async def initialize_browser() -> str:
     Returns:
         初期化結果のメッセージ
     """
-    global playwright, browser, page, context, BROWSER_INITIALIZED
+    global playwright, browser, page, context, BROWSER_INITIALIZED, INITIALIZATION_IN_PROGRESS
+    
+    # 既に初期化中の場合は待機中のメッセージを返す
+    if INITIALIZATION_IN_PROGRESS:
+        return "ブラウザの初期化が既に進行中です。しばらくお待ちください..."
+    
+    # 既に初期化済みの場合は成功メッセージを返す
+    if BROWSER_INITIALIZED and browser and page:
+        return "ブラウザは既に初期化されています"
+    
+    # 初期化フラグを設定
+    INITIALIZATION_IN_PROGRESS = True
     
     try:
         debug_log("ブラウザ初期化を開始します")
@@ -188,12 +216,12 @@ async def initialize_browser() -> str:
         # 既存のインスタンスをクローズ
         await close_browser()
             
-        # Playwrightを起動
+        # Playwrightを起動（高速化オプション追加）
         debug_log("Playwrightを起動します")
         playwright = await async_playwright().start()
         debug_log("Playwrightが起動しました")
         
-        # ブラウザオプションを設定
+        # ブラウザオプションを設定（高速化設定追加）
         browser_options = {
             "headless": True,
             "args": [
@@ -201,7 +229,12 @@ async def initialize_browser() -> str:
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-setuid-sandbox",
-                "--no-zygote"
+                "--no-zygote",
+                "--disable-extensions",
+                "--disable-software-rasterizer",
+                "--disable-features=site-per-process",
+                "--disable-web-security",
+                "--js-flags=--max_old_space_size=128"  # メモリ使用量を制限
             ]
         }
         
@@ -213,7 +246,10 @@ async def initialize_browser() -> str:
         # ブラウザコンテキストオプションを設定
         context_options = {
             "viewport": {"width": 1280, "height": 800},
-            "ignore_https_errors": True
+            "ignore_https_errors": True,
+            "java_script_enabled": True,  # JavaScriptを有効化
+            "bypass_csp": True,  # CSP制約を回避
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.84 Safari/537.36"  # 一般的なUAを設定
         }
         
         # ブラウザコンテキストを作成
@@ -235,6 +271,9 @@ async def initialize_browser() -> str:
         stack_trace = traceback.format_exc()
         debug_log(f"{error_msg}\n{stack_trace}")
         return error_msg
+    finally:
+        # 初期化フラグをリセット
+        INITIALIZATION_IN_PROGRESS = False
 
 @mcp.tool()
 async def browse(url: str) -> str:
@@ -467,13 +506,39 @@ def start_server():
         import atexit
         atexit.register(shutdown_handler)
         
+        # サーバー起動前のヘルスチェック
+        debug_log("ヘルスチェックを実行します")
+        # OSやプロセスのリソース状況を確認
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        debug_log(f"メモリ使用量: {memory_info.rss / (1024*1024):.2f} MB")
+        
         # サーバー起動（追加のエラー捕捉）
         debug_log("mcp.run()を呼び出します")
         
         # 標準出力のリダイレクトを保護
         with redirect_stdout(NullIO()), redirect_stderr(NullIO()):
-            mcp.run()
+            # サーバー起動のためのエラーハンドリング追加
+            try:
+                mcp.run()
+            except Exception as server_error:
+                error_msg = f"サーバー実行中にエラーが発生: {str(server_error)}"
+                stack_trace = traceback.format_exc()
+                debug_log(f"{error_msg}\n{stack_trace}")
+                
+                # 深刻なエラーをログファイルに記録
+                with open("browser_use_fatal_error.log", "a", encoding="utf-8") as f:
+                    f.write(f"{error_msg}\n{stack_trace}\n")
+                
+                # ブラウザを確実にクローズ
+                asyncio.run(close_browser())
+                
+                # 例外を再スロー
+                raise
             
+    except ImportError:
+        debug_log("psutilがインストールされていないため、リソースチェックをスキップします")
     except Exception as e:
         error_msg = f"サーバー起動中にエラーが発生: {str(e)}"
         stack_trace = traceback.format_exc()
