@@ -282,7 +282,7 @@ async def find_elements(selector: str) -> str:
             selector = f"text={selector}"
         
         # 要素を検索
-        elements = await page.$$(selector)
+        elements = await page.query_selector_all(selector)
         
         if not elements:
             return f"セレクタ '{selector}' に一致する要素は見つかりませんでした。"
