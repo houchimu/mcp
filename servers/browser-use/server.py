@@ -76,6 +76,11 @@ for logger_name in critical_loggers:
 
 # NullIO - 出力を完全に捨てるためのIO
 class NullIO(io.IOBase):
+    def __init__(self):
+        super().__init__()
+        # bufferプロパティを追加（自己参照）
+        self.buffer = self
+
     def write(self, *args, **kwargs):
         return 0
     
@@ -84,10 +89,42 @@ class NullIO(io.IOBase):
     
     def flush(self, *args, **kwargs):
         pass
+    
+    # バッファ操作のためのメソッドを追加
+    def readable(self):
+        return False
+        
+    def writable(self):
+        return True
+    
+    def seekable(self):
+        return False
+    
+    def fileno(self):
+        raise OSError("NullIO has no file descriptor")
+    
+    def isatty(self):
+        return False
+    
+    def truncate(self, size=None):
+        return 0
+        
+    def readline(self, size=-1):
+        return ''
+        
+    def readlines(self, hint=-1):
+        return []
+        
+    def writelines(self, lines):
+        return 0
 
-# 標準出力をリダイレクト
-sys.stdout = NullIO()
-sys.stderr = NullIO()
+# 標準出力をリダイレクト（NullIOを使用）
+try:
+    sys.stdout = NullIO()
+    sys.stderr = NullIO()
+    debug_log("標準出力と標準エラー出力をリダイレクトしました")
+except Exception as e:
+    debug_log(f"標準出力のリダイレクトに失敗: {str(e)}")
 
 # asyncioのデバッグを無効化
 try:
@@ -430,9 +467,13 @@ def start_server():
         import atexit
         atexit.register(shutdown_handler)
         
-        # サーバー起動
+        # サーバー起動（追加のエラー捕捉）
         debug_log("mcp.run()を呼び出します")
-        mcp.run()
+        
+        # 標準出力のリダイレクトを保護
+        with redirect_stdout(NullIO()), redirect_stderr(NullIO()):
+            mcp.run()
+            
     except Exception as e:
         error_msg = f"サーバー起動中にエラーが発生: {str(e)}"
         stack_trace = traceback.format_exc()
@@ -446,8 +487,11 @@ def start_server():
         asyncio.run(close_browser())
         
         # 意図的にエラーメッセージを標準エラーに出力（デバッグ用）
-        original_stderr = sys.__stderr__
-        original_stderr.write(f"MCPサーバーエラー: {error_msg}\n")
+        try:
+            original_stderr = sys.__stderr__
+            original_stderr.write(f"MCPサーバーエラー: {error_msg}\n")
+        except:
+            pass
         
         sys.exit(1)
 
