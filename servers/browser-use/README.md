@@ -6,14 +6,16 @@
 
 このサーバーは以下の機能を提供します：
 
-1. **browse(url)**: 指定されたURLにアクセスします
-2. **execute_task(task)**: 指定されたタスクをブラウザで自然言語指示に基づいて実行します
-3. **get_page_info()**: 現在開いているページの情報を取得します
-4. **find_elements(description)**: 指定された説明に一致する要素を自然言語で検索します
-5. **click_element(description)**: 指定された説明に一致する要素を自然言語でクリックします
-6. **fill_form(form_description, data)**: 指定されたフォームにデータを自然言語で入力します
-7. **take_screenshot()**: 現在のページのスクリーンショットを撮影します
-8. **submit_form(form_description)**: 指定されたフォームを自然言語で送信します
+1. **initialize_browser()**: ブラウザを初期化します（他のツールを使用する前に必ず呼び出す必要があります）
+2. **browse(url)**: 指定されたURLにアクセスします
+3. **execute_task(task)**: 指定されたタスクをブラウザで自然言語指示に基づいて実行します
+4. **get_page_info()**: 現在開いているページの情報を取得します
+5. **find_elements(description)**: 指定された説明に一致する要素を自然言語で検索します
+6. **click_element(description)**: 指定された説明に一致する要素を自然言語でクリックします
+7. **fill_form(form_description, data)**: 指定されたフォームにデータを自然言語で入力します
+8. **take_screenshot()**: 現在のページのスクリーンショットを撮影します
+9. **submit_form(form_description)**: 指定されたフォームを自然言語で送信します
+10. **close_browser()**: ブラウザを終了します（使い終わったら呼び出すことをお勧めします）
 
 ## 依存関係
 
@@ -45,6 +47,9 @@ python server.py
 ## 使用例
 
 ```python
+# ブラウザを初期化（最初に必ず実行）
+await initialize_browser()
+
 # URLにアクセス
 await browse("https://example.com")
 
@@ -68,6 +73,9 @@ await take_screenshot()
 
 # 自然言語でフォームを送信
 await submit_form("検索フォーム")
+
+# 使い終わったらブラウザを終了
+await close_browser()
 ```
 
 ## 特徴
@@ -81,4 +89,5 @@ await submit_form("検索フォーム")
 
 - このサーバーを使用するには、OpenAIなどのLLM APIキーが必要です
 - 処理時間はLLMの応答時間に依存するため、Playwrightなど低レベルのブラウザ自動化ツールよりも遅くなる場合があります
-- LLMの判断に基づくため、完全に決定論的な動作は保証されません 
+- LLMの判断に基づくため、完全に決定論的な動作は保証されません
+- 必ず最初に`initialize_browser()`を呼び出し、使い終わったら`close_browser()`を呼び出してリソースを解放してください 

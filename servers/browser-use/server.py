@@ -19,37 +19,54 @@ browser_instance = None
 last_response = None
 current_url = ""
 
-# サーバー初期化
-@mcp.on_startup
-async def startup():
-    """サーバー起動時にブラウザを初期化します"""
+# ブラウザインスタンスを初期化するツール
+@mcp.tool()
+async def initialize_browser() -> str:
+    """ブラウザを初期化します。他のツールを使用する前に必ずこれを呼び出してください。
+    
+    Returns:
+        初期化結果のメッセージ
+    """
     global browser_instance
     
-    # ブラウザインスタンスを作成
-    browser_instance = Browser(
-        config=BrowserConfig(
-            headless=True
+    try:
+        # ブラウザインスタンスを作成
+        browser_instance = Browser(
+            config=BrowserConfig(
+                headless=True
+            )
         )
-    )
-    
-    print("ブラウザが初期化されました")
+        
+        return "ブラウザが正常に初期化されました"
+    except Exception as e:
+        return f"ブラウザの初期化に失敗しました: {str(e)}"
 
-# サーバー終了時の処理
-@mcp.on_shutdown
-async def shutdown():
-    """サーバー終了時にブラウザを閉じます"""
+# ブラウザを終了するツール
+@mcp.tool()
+async def close_browser() -> str:
+    """ブラウザを終了します。サーバーを終了する前に呼び出すことをお勧めします。
+    
+    Returns:
+        終了結果のメッセージ
+    """
     global browser_instance
     
-    if browser_instance:
+    if not browser_instance:
+        return "ブラウザはまだ初期化されていません。"
+    
+    try:
         await browser_instance.close()
-        print("ブラウザが正常に終了しました")
+        browser_instance = None
+        return "ブラウザが正常に終了しました"
+    except Exception as e:
+        return f"ブラウザの終了に失敗しました: {str(e)}"
 
 # エージェントの作成または取得
 def get_or_create_agent(task: str):
     """タスクに基づいてブラウザエージェントを作成または取得します"""
     global browser_agent, browser_instance
     
-    if not browser_agent:
+    if not browser_agent and browser_instance:
         # OpenAI APIキーが設定されていない場合、ダミーのLLMを作成
         # 実際の利用時には適切なAPIキーを設定してください
         llm = ChatOpenAI(model="gpt-4o")
@@ -74,6 +91,9 @@ async def browse(url: str) -> str:
     """
     global browser_instance, current_url
     
+    if not browser_instance:
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
+    
     try:
         agent = get_or_create_agent(f"Webページ「{url}」にアクセスする")
         response = await agent.run()
@@ -95,7 +115,7 @@ async def execute_task(task: str) -> str:
     global browser_instance, last_response
     
     if not browser_instance:
-        return "まだブラウザが初期化されていません。"
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
         agent = get_or_create_agent(task)
@@ -120,7 +140,7 @@ async def get_page_info() -> str:
     global browser_instance, current_url
     
     if not browser_instance:
-        return "まだブラウザが初期化されていません。"
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     if not current_url:
         return "まだページが開かれていません。browse()を使用してURLにアクセスしてください。"
@@ -150,7 +170,7 @@ async def find_elements(description: str) -> str:
     global browser_instance
     
     if not browser_instance:
-        return "まだブラウザが初期化されていません。"
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
         agent = get_or_create_agent(f"現在のページで「{description}」に一致する要素を見つけて内容を報告する")
@@ -177,7 +197,7 @@ async def click_element(description: str) -> str:
     global browser_instance
     
     if not browser_instance:
-        return "まだブラウザが初期化されていません。"
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
         agent = get_or_create_agent(f"現在のページで「{description}」に一致する要素を見つけてクリックする")
@@ -201,7 +221,7 @@ async def fill_form(form_description: str, data: str) -> str:
     global browser_instance
     
     if not browser_instance:
-        return "まだブラウザが初期化されていません。"
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
         agent = get_or_create_agent(f"現在のページで「{form_description}」に一致するフォームを見つけて、以下のデータを入力する: {data}")
@@ -221,7 +241,7 @@ async def take_screenshot() -> str:
     global browser_instance
     
     if not browser_instance:
-        return "まだブラウザが初期化されていません。"
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
         agent = get_or_create_agent("現在のページのスクリーンショットを撮影する")
@@ -256,7 +276,7 @@ async def submit_form(form_description: str) -> str:
     global browser_instance
     
     if not browser_instance:
-        return "まだブラウザが初期化されていません。"
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
         agent = get_or_create_agent(f"現在のページで「{form_description}」に一致するフォームを見つけて送信する")
