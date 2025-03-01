@@ -5,12 +5,11 @@ import sys
 import logging
 import io
 import builtins
-import uvicorn
-from contextlib import nullcontext, redirect_stdout, redirect_stderr
+import json
+from contextlib import redirect_stdout, redirect_stderr
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
-from browser_use import Agent, Browser, BrowserConfig
-from langchain_openai import ChatOpenAI
+from playwright.async_api import async_playwright, Page, Browser
 
 # サーバー起動前の準備
 # -------------------------------
@@ -49,7 +48,6 @@ critical_loggers = [
     "starlette.routing",
     "mcp",
     "mcp.server",
-    "browser_use",
     "playwright",
     "fastapi",
     "asyncio",
@@ -92,34 +90,13 @@ load_dotenv()
 # FastMCP サーバーの作成 - 最小限の設定
 mcp = FastMCP(
     "Browser Use Server",
-    settings={
-        "debug": False,
-        "log_level": "critical"
-    }
 )
 
-# ブラウザエージェント管理
-browser_agent = None
-browser_instance = None
+# Playwrightセッション管理
+playwright = None
+browser = None
+page = None
 current_url = ""
-
-# エージェントの作成または取得
-def get_or_create_agent(task: str):
-    """タスクに基づいてブラウザエージェントを作成または取得します"""
-    global browser_agent, browser_instance
-    
-    if not browser_agent and browser_instance:
-        # OpenAI APIキーが設定されていない場合、ダミーのLLMを作成
-        # 実際の利用時には適切なAPIキーを設定してください
-        llm = ChatOpenAI(model="gpt-4o")
-        
-        browser_agent = Agent(
-            task=task,
-            llm=llm,
-            browser=browser_instance
-        )
-    
-    return browser_agent
 
 # サーバーツール定義 
 # -------------------------------
@@ -131,18 +108,27 @@ async def initialize_browser() -> str:
     Returns:
         初期化結果のメッセージ
     """
-    global browser_instance
+    global playwright, browser, page
     
     try:
-        # ブラウザインスタンスを作成
-        browser_instance = Browser(
-            config=BrowserConfig(
-                headless=True
-            )
-        )
+        # 既存のインスタンスをクローズ
+        if page:
+            await page.close()
+        if browser:
+            await browser.close()
+        if playwright:
+            await playwright.stop()
+            
+        # Playwrightを起動
+        playwright = await async_playwright().start()
+        # Chromiumブラウザを起動（ヘッドレスモード）
+        browser = await playwright.chromium.launch(headless=True)
+        # 新しいページを開く
+        page = await browser.new_page()
         
         return "ブラウザが正常に初期化されました"
     except Exception as e:
+        # エラーをキャッチしてメッセージを返す
         return f"ブラウザの初期化に失敗しました: {str(e)}"
 
 @mcp.tool()
@@ -155,17 +141,24 @@ async def browse(url: str) -> str:
     Returns:
         アクセス結果のメッセージ
     """
-    global browser_instance, current_url
+    global page, current_url
     
-    if not browser_instance:
+    if not page:
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
-        agent = get_or_create_agent(f"Webページ「{url}」にアクセスする")
-        response = await agent.run()
-        
+        # URLに移動
+        await page.goto(url, wait_until="networkidle")
         current_url = url
-        return f"URLにアクセスしました: {url}\n\n応答: {response[:500]}..." if len(response) > 500 else response
+        
+        # ページタイトルを取得
+        title = await page.title()
+        
+        # ページコンテンツの一部を取得
+        content = await page.content()
+        content_preview = content[:500] + "..." if len(content) > 500 else content
+        
+        return f"URLにアクセスしました: {url}\nタイトル: {title}\n\nページプレビュー: {content_preview}"
     except Exception as e:
         return f"エラーが発生しました: {str(e)}"
 
@@ -174,25 +167,49 @@ async def execute_task(task: str) -> str:
     """指定されたタスクをブラウザで実行します。
     
     Args:
-        task: 実行するタスク内容（自然言語で指定）
+        task: 実行するタスク内容（例: 「検索ボタンをクリック」「ログインフォームに入力」など）
     
     Returns:
         タスク実行の結果、またはエラーメッセージ
     """
-    global browser_instance
+    global page
     
-    if not browser_instance:
+    if not page:
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
-        agent = get_or_create_agent(task)
-        response = await agent.run()
+        # タスクを解析して実行（基本的な例）
+        if "クリック" in task or "click" in task.lower():
+            # クリック操作を想定したテキスト解析（簡易版）
+            element_text = task.split("クリック")[0].strip()
+            if not element_text:
+                element_text = task.lower().split("click")[0].strip()
+            
+            # テキストに一致する要素をクリック
+            await page.click(f"text={element_text}")
+            return f"「{element_text}」をクリックしました"
+            
+        elif "入力" in task or "type" in task.lower() or "fill" in task.lower():
+            # 入力操作の簡易解析
+            parts = task.split("入力")
+            if len(parts) < 2:
+                parts = task.lower().split("type")
+            if len(parts) < 2:
+                parts = task.lower().split("fill")
+            
+            if len(parts) >= 2:
+                field = parts[0].strip()
+                text = parts[1].strip()
+                
+                # 指定されたフィールドに入力
+                await page.fill(f"input[placeholder*='{field}'], textarea[placeholder*='{field}'], [aria-label*='{field}']", text)
+                return f"「{field}」に「{text}」を入力しました"
+            
+        # その他のタスクは単純なスクリーンショットを撮って返す
+        screenshot_path = "screenshot.png"
+        await page.screenshot(path=screenshot_path)
         
-        # 長い応答は切り詰める
-        if len(response) > 1500:
-            response = response[:1497] + "..."
-        
-        return f"タスク実行結果:\n{response}"
+        return f"タスク「{task}」を実行し、スクリーンショットを保存しました: {screenshot_path}"
     except Exception as e:
         return f"タスク実行に失敗しました: {str(e)}"
 
@@ -203,97 +220,204 @@ async def get_page_info() -> str:
     Returns:
         ページの情報、またはエラーメッセージ
     """
-    global browser_instance, current_url
+    global page, current_url
     
-    if not browser_instance:
+    if not page:
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     if not current_url:
         return "まだページが開かれていません。browse()を使用してURLにアクセスしてください。"
     
     try:
-        agent = get_or_create_agent(f"現在開いているページ「{current_url}」のタイトル、URL、主要なコンテンツを取得する")
-        response = await agent.run()
+        # ページタイトルを取得
+        title = await page.title()
         
-        # 長い応答は切り詰める
-        if len(response) > 1500:
-            response = response[:1497] + "..."
+        # 現在のURL
+        url = page.url
         
-        return f"ページ情報:\n{response}"
+        # メタディスクリプションを取得
+        description = await page.evaluate("() => { const meta = document.querySelector('meta[name=\"description\"]'); return meta ? meta.getAttribute('content') : ''; }")
+        
+        # メインコンテンツを取得 (h1, h2, pタグなど)
+        headings = await page.evaluate("""() => {
+            const h1s = Array.from(document.querySelectorAll('h1')).map(h => h.innerText);
+            const h2s = Array.from(document.querySelectorAll('h2')).slice(0, 3).map(h => h.innerText);
+            return { h1s, h2s };
+        }""")
+        
+        # 結果をフォーマット
+        result = f"ページ情報:\n"
+        result += f"タイトル: {title}\n"
+        result += f"URL: {url}\n"
+        result += f"説明: {description}\n\n"
+        
+        result += "見出し:\n"
+        if headings['h1s']:
+            result += "H1: " + "\n    ".join(headings['h1s']) + "\n"
+        if headings['h2s']:
+            result += "H2: " + "\n    ".join(headings['h2s']) + "\n"
+        
+        return result
     except Exception as e:
         return f"ページ情報の取得に失敗しました: {str(e)}"
 
 @mcp.tool()
-async def find_elements(description: str) -> str:
-    """指定された説明に一致する要素を検索します。
+async def find_elements(selector: str) -> str:
+    """指定されたセレクタに一致する要素を検索します。
     
     Args:
-        description: 検索する要素の説明（自然言語で）
+        selector: CSSセレクタまたはテキスト（例: 'div.content', 'button', 'text=ログイン'）
     
     Returns:
         見つかった要素の情報、またはエラーメッセージ
     """
-    global browser_instance
+    global page
     
-    if not browser_instance:
+    if not page:
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
-        agent = get_or_create_agent(f"現在のページで「{description}」に一致する要素を見つけて内容を報告する")
-        response = await agent.run()
+        # セレクタが「text=」で始まっていない場合は追加
+        if not selector.startswith("text=") and not any(char in selector for char in "[]#.:>+"):
+            selector = f"text={selector}"
         
-        # 長い応答は切り詰める
-        if len(response) > 1500:
-            response = response[:1497] + "..."
+        # 要素を検索
+        elements = await page.$$(selector)
         
-        return f"検索結果:\n{response}"
+        if not elements:
+            return f"セレクタ '{selector}' に一致する要素は見つかりませんでした。"
+        
+        # 最大10個の要素情報を収集
+        result = []
+        for i, element in enumerate(elements[:10]):
+            # 要素のテキストを取得
+            text = await page.evaluate("el => el.textContent", element)
+            # 要素のタグ名を取得
+            tag_name = await page.evaluate("el => el.tagName", element)
+            # 要素の属性を取得
+            attrs = await page.evaluate("""el => {
+                const result = {};
+                for (const attr of el.attributes) {
+                    result[attr.name] = attr.value;
+                }
+                return result;
+            }""", element)
+            
+            # 結果に追加
+            result.append({
+                "index": i + 1,
+                "tag": tag_name,
+                "text": text.strip() if text else "",
+                "attributes": attrs
+            })
+        
+        # 結果をフォーマット
+        output = f"検索結果: {len(elements)} 要素が見つかりました (最大10件表示)\n\n"
+        
+        for item in result:
+            output += f"{item['index']}. <{item['tag'].lower()}"
+            
+            # 主要な属性を表示
+            if 'id' in item['attributes']:
+                output += f" id=\"{item['attributes']['id']}\""
+            if 'class' in item['attributes']:
+                output += f" class=\"{item['attributes']['class']}\""
+            
+            output += ">\n"
+            output += f"   テキスト: {item['text'][:100]}{'...' if len(item['text']) > 100 else ''}\n"
+            
+            # 追加の重要な属性を表示
+            for key in ['href', 'src', 'value', 'type', 'name']:
+                if key in item['attributes']:
+                    output += f"   {key}: {item['attributes'][key]}\n"
+            
+            output += "\n"
+        
+        return output
     except Exception as e:
         return f"要素の検索に失敗しました: {str(e)}"
 
 @mcp.tool()
-async def click_element(description: str) -> str:
-    """指定された説明に一致する要素をクリックします。
+async def click_element(selector: str) -> str:
+    """指定されたセレクタに一致する要素をクリックします。
     
     Args:
-        description: クリックする要素の説明（自然言語で）
+        selector: クリックする要素のCSSセレクタまたはテキスト
     
     Returns:
         クリック操作の結果、またはエラーメッセージ
     """
-    global browser_instance
+    global page
     
-    if not browser_instance:
+    if not page:
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
-        agent = get_or_create_agent(f"現在のページで「{description}」に一致する要素を見つけてクリックする")
-        response = await agent.run()
+        # セレクタが「text=」で始まっていない場合は追加
+        if not selector.startswith("text=") and not any(char in selector for char in "[]#.:>+"):
+            selector = f"text={selector}"
         
-        return f"クリック結果:\n{response}"
+        # 要素が見つかるまで待機してからクリック
+        await page.wait_for_selector(selector, timeout=5000)
+        await page.click(selector)
+        
+        # クリック後のページタイトルを取得
+        title = await page.title()
+        current_url = page.url
+        
+        return f"要素 '{selector}' をクリックしました\n新しいページ: {title} ({current_url})"
     except Exception as e:
         return f"クリックに失敗しました: {str(e)}"
 
 @mcp.tool()
-async def fill_form(form_description: str, data: str) -> str:
-    """指定されたフォームにデータを入力します。
+async def fill_form(selector: str, text: str) -> str:
+    """指定されたセレクタに一致するフォーム要素にテキストを入力します。
     
     Args:
-        form_description: 入力するフォームの説明（自然言語で）
-        data: 入力するデータの説明（自然言語で）
+        selector: 入力フィールドのCSSセレクタまたはラベルテキスト
+        text: 入力するテキスト
     
     Returns:
         フォーム入力の結果、またはエラーメッセージ
     """
-    global browser_instance
+    global page
     
-    if not browser_instance:
+    if not page:
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
-        agent = get_or_create_agent(f"現在のページで「{form_description}」に一致するフォームを見つけて、以下のデータを入力する: {data}")
-        response = await agent.run()
+        # セレクタをテキストベースに変換（必要な場合）
+        if not any(char in selector for char in "[]#.:>+"):
+            # 入力フィールドの一般的なセレクタパターンを試行
+            try:
+                # ラベルに基づくセレクタ
+                await page.wait_for_selector(f"text={selector}", timeout=1000)
+                label_element = await page.query_selector(f"text={selector}")
+                
+                if label_element:
+                    # ラベルのforを確認
+                    for_id = await page.evaluate("""el => {
+                        if (el.getAttribute('for')) return el.getAttribute('for');
+                        return null;
+                    }""", label_element)
+                    
+                    if for_id:
+                        selector = f"#{for_id}"
+                    else:
+                        # ラベルに関連する入力を探す
+                        selector = f"label:has-text('{selector}') input, label:has-text('{selector}') textarea"
+                else:
+                    # プレースホルダ属性で探す
+                    selector = f"input[placeholder*='{selector}'], textarea[placeholder*='{selector}']"
+            except:
+                # 直接的なテキストセレクタに戻る
+                selector = f"input[placeholder*='{selector}'], textarea[placeholder*='{selector}'], [aria-label*='{selector}']"
         
-        return f"フォーム入力結果:\n{response}"
+        # 要素を待機して入力
+        await page.wait_for_selector(selector, timeout=5000)
+        await page.fill(selector, text)
+        
+        return f"'{selector}' に「{text}」を入力しました"
     except Exception as e:
         return f"フォーム入力に失敗しました: {str(e)}"
 
@@ -304,15 +428,12 @@ async def take_screenshot() -> str:
     Returns:
         スクリーンショットの結果、またはエラーメッセージ
     """
-    global browser_instance
+    global page
     
-    if not browser_instance:
+    if not page:
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
-        agent = get_or_create_agent("現在のページのスクリーンショットを撮影する")
-        response = await agent.run()
-        
         # スクリーンショットのパスを設定
         screenshot_dir = "screenshots"
         os.makedirs(screenshot_dir, exist_ok=True)
@@ -322,48 +443,116 @@ async def take_screenshot() -> str:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{screenshot_dir}/screenshot_{timestamp}.png"
         
-        return f"スクリーンショット処理結果:\n{response}"
+        # スクリーンショットを撮影
+        await page.screenshot(path=filename)
+        
+        # 現在のURLとタイトルも取得
+        title = await page.title()
+        url = page.url
+        
+        return f"スクリーンショット撮影成功:\nファイル: {filename}\nページ: {title} ({url})"
     except Exception as e:
         return f"スクリーンショット撮影に失敗しました: {str(e)}"
 
 @mcp.tool()
-async def submit_form(form_description: str) -> str:
+async def submit_form(form_selector: str = "form") -> str:
     """指定されたフォームを送信します。
     
     Args:
-        form_description: 送信するフォームの説明（自然言語で）
+        form_selector: 送信するフォームのセレクタ (デフォルト: "form")
     
     Returns:
         フォーム送信の結果、またはエラーメッセージ
     """
-    global browser_instance
+    global page
     
-    if not browser_instance:
+    if not page:
         return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
     
     try:
-        agent = get_or_create_agent(f"現在のページで「{form_description}」に一致するフォームを見つけて送信する")
-        response = await agent.run()
+        # フォームセレクタが指定されていない場合は、単純に Enter キーを押す
+        if form_selector.lower() == "form":
+            await page.press("input:focus", "Enter")
+        else:
+            # フォームを見つけて送信ボタンをクリック
+            if not any(char in form_selector for char in "[]#.:>+"):
+                # テキストベースのセレクタの場合
+                await page.click(f"text={form_selector}")
+            else:
+                # CSS セレクタの場合
+                form = await page.query_selector(form_selector)
+                if form:
+                    # 送信ボタンを探す
+                    submit_button = await form.query_selector("input[type=submit], button[type=submit], button:has-text('送信'), button:has-text('Submit')")
+                    if submit_button:
+                        await submit_button.click()
+                    else:
+                        # ボタンが見つからない場合は、フォームをJavaScriptで送信
+                        await page.evaluate(f"document.querySelector('{form_selector}').submit()")
+                else:
+                    return f"フォーム '{form_selector}' が見つかりませんでした"
         
-        return f"フォーム送信結果:\n{response}"
+        # ページが読み込まれるのを待つ
+        await page.wait_for_load_state("networkidle")
+        
+        # 新しいページ情報を取得
+        title = await page.title()
+        url = page.url
+        
+        return f"フォームを送信しました\n新しいページ: {title} ({url})"
     except Exception as e:
         return f"フォーム送信に失敗しました: {str(e)}"
 
-# カスタムサーバー起動関数
-# -------------------------------
-def run_mcp_server():
+@mcp.tool()
+async def evaluate_javascript(script: str) -> str:
+    """JavaScriptコードをページ上で実行します。
+    
+    Args:
+        script: 実行するJavaScriptコード
+    
+    Returns:
+        実行結果、またはエラーメッセージ
+    """
+    global page
+    
+    if not page:
+        return "まだブラウザが初期化されていません。initialize_browser()を最初に呼び出してください。"
+    
     try:
-        # 全ての出力をNullIOに向ける
-        with redirect_stdout(NullIO()), redirect_stderr(NullIO()):
-            # サーバー実行
-            mcp.run()
+        # JavaScriptを実行
+        result = await page.evaluate(f"() => {{ try {{ return {script} }} catch(e) {{ return 'エラー: ' + e.message }} }}")
+        
+        # 結果をJSON文字列化（オブジェクトの場合）
+        if isinstance(result, (dict, list)):
+            result = json.dumps(result, ensure_ascii=False, indent=2)
+        
+        return f"JavaScriptの実行結果:\n{result}"
     except Exception as e:
-        # エラーログをファイルに書き込み
-        with open("browser_use_error.log", "a") as f:
-            f.write(f"{str(e)}\n")
-        sys.exit(1)
+        return f"JavaScriptの実行に失敗しました: {str(e)}"
+
+# ブラウザを確実にクローズするための関数
+async def close_browser():
+    global playwright, browser, page
+    
+    try:
+        if page:
+            await page.close()
+        if browser:
+            await browser.close()
+        if playwright:
+            await playwright.stop()
+    except:
+        pass
 
 # メイン関数
 if __name__ == "__main__":
-    # サーバー起動
-    run_mcp_server() 
+    try:
+        # サーバー起動
+        mcp.run()
+    except Exception as e:
+        # 例外情報をファイルに記録
+        with open("browser_use_error.log", "a") as f:
+            f.write(f"{str(e)}\n")
+        # ブラウザをクローズ
+        asyncio.run(close_browser())
+        sys.exit(1)
