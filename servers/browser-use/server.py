@@ -1,20 +1,75 @@
 from mcp.server.fastmcp import FastMCP
 import os
 import asyncio
+import sys
+import logging
+import io
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, BrowserConfig
 from langchain_openai import ChatOpenAI
 
+# ------ ロギング関連の設定 -------
+# すべてのロガーを無効化
+logging.basicConfig(level=logging.CRITICAL)
+
+# すべての既存ロガーを無効化
+for name in logging.root.manager.loggerDict:
+    logger = logging.getLogger(name)
+    logger.handlers = []
+    logger.propagate = False
+    logger.setLevel(logging.CRITICAL)
+
+# ルートロガーからすべてのハンドラを削除
+logging.root.handlers = []
+
+# FastMCPに関連するモジュールのロガーを明示的に無効化
+critical_loggers = [
+    "uvicorn", 
+    "uvicorn.error", 
+    "uvicorn.access", 
+    "uvicorn.asgi",
+    "starlette", 
+    "starlette.routing",
+    "mcp",
+    "mcp.server",
+    "browser_use",
+    "playwright",
+    "fastapi"
+]
+
+for logger_name in critical_loggers:
+    logger = logging.getLogger(logger_name)
+    logger.handlers = []
+    logger.propagate = False
+    logger.disabled = True
+    logger.setLevel(logging.CRITICAL)
+
+# NullIO - 出力を完全に捨てるためのIO
+class NullIO(io.IOBase):
+    def write(self, *args, **kwargs):
+        return 0
+    
+    def read(self, *args, **kwargs):
+        return ''
+    
+    def flush(self, *args, **kwargs):
+        pass
+
+# 標準出力をリダイレクト
+sys.stdout = NullIO()
+sys.stderr = NullIO()
+
 # 環境変数をロード
 load_dotenv()
 
-# FastMCP サーバーの作成 - デバッグモードを無効にし、ログレベルを ERROR に設定
+# FastMCP サーバーの作成 - デバッグモードを無効にし、ログレベルを CRITICAL に設定
+# CRITICAL は最も高いロギングレベルで、ほとんどのメッセージを抑制します
 mcp = FastMCP(
     "Browser Use Server",
     settings={
         "debug": False,
-        "log_level": "ERROR"  # UvicornとStarletteのログレベルを制限
+        "log_level": "critical"  # UvicornとStarletteのログレベルを最も制限
     }
 )
 
@@ -272,6 +327,7 @@ if __name__ == "__main__":
         # シンプルな実行
         mcp.run()
     except Exception as e:
-        print(f"サーバー実行中にエラーが発生しました: {str(e)}")
-        import sys
+        # 例外情報をファイルに記録（デバッグ用）
+        with open("browser_use_error.log", "a") as f:
+            f.write(f"{str(e)}\n")
         sys.exit(1) 
