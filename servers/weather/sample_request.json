@@ -1,0 +1,10 @@
+{
+  "id": "123",
+  "method": "tools/call",
+  "params": {
+    "name": "get_weather",
+    "arguments": {
+      "city": "tokyo"
+    }
+  }
+} 
