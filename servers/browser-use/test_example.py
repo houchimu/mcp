@@ -1,77 +1,69 @@
 import asyncio
-from mcp.client import Tool
+from mcp.client import MCPClient
 
 async def test_browser_use():
     """browser-useサーバーの機能をテストするサンプルコード"""
     
-    # ツールのインスタンスを作成
-    initialize_browser = Tool("initialize_browser")
-    browse = Tool("browse")
-    execute_task = Tool("execute_task")
-    get_page_info = Tool("get_page_info")
-    find_elements = Tool("find_elements")
-    click_element = Tool("click_element")
-    fill_form = Tool("fill_form")
-    take_screenshot = Tool("take_screenshot")
-    submit_form = Tool("submit_form")
-    close_browser = Tool("close_browser")
+    # MCPクライアントを初期化
+    client = MCPClient(server_name="browser-use")
     
     try:
         # 0. ブラウザを初期化
         print("0. ブラウザを初期化します...")
-        init_result = await initialize_browser()
+        init_result = await client.call("initialize_browser")
         print(init_result)
         
         # 1. Googleにアクセス
         print("\n1. Google.comにアクセスします...")
-        result = await browse(url="https://www.google.com")
+        result = await client.call("browse", url="https://www.google.com")
         print(result)
         
         # 2. ページ情報を取得
         print("\n2. ページ情報を取得します...")
-        info = await get_page_info()
+        info = await client.call("get_page_info")
         print(info)
         
         # 3. 検索フォームを検索
         print("\n3. 検索フォームを検索します...")
-        search_elements = await find_elements(description="検索フォーム")
+        search_elements = await client.call("find_elements", description="検索フォーム")
         print(search_elements)
         
         # 4. フォームに入力
         print("\n4. 検索フォームに「browser-use python」と入力します...")
-        await fill_form(form_description="検索フォーム", data="browser-use python")
+        await client.call("fill_form", form_description="検索フォーム", data="browser-use python")
         
         # 5. スクリーンショットを撮影
         print("\n5. 入力後の状態をスクリーンショットで保存します...")
-        screenshot = await take_screenshot()
+        screenshot = await client.call("take_screenshot")
         print(screenshot)
         
         # 6. フォームを送信
         print("\n6. 検索フォームを送信します...")
-        submit_result = await submit_form(form_description="検索フォーム")
+        submit_result = await client.call("submit_form", form_description="検索フォーム")
         print(submit_result)
         
         # 7. 複合タスクを実行
         print("\n7. 複合タスクを実行します...")
-        complex_task = await execute_task(
+        complex_task = await client.call(
+            "execute_task",
             task="検索結果から最初の3つのリンクのタイトルを抽出して、それらを箇条書きで返してください"
         )
         print(complex_task)
         
         # 8. 要素をクリック
         print("\n8. 最初の検索結果をクリックします...")
-        click_result = await click_element(description="最初の検索結果")
+        click_result = await client.call("click_element", description="最初の検索結果")
         print(click_result)
         
         # 9. 最終ページの情報を取得
         print("\n9. 遷移先ページの情報を取得します...")
-        final_info = await get_page_info()
+        final_info = await client.call("get_page_info")
         print(final_info)
     
     finally:
         # 10. ブラウザを終了
         print("\n10. ブラウザを終了します...")
-        close_result = await close_browser()
+        close_result = await client.call("close_browser")
         print(close_result)
 
 if __name__ == "__main__":
